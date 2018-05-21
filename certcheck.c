@@ -1,6 +1,5 @@
-/**
-Example certifcate code
-gcc -o certcheck certcheck.c -lssl -lcrypto
+/**Qianqian Zheng 813288
+Assignment 2
 */
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
@@ -26,7 +25,6 @@ gcc -o certcheck certcheck.c -lssl -lcrypto
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-// #include <resolv.h>
 #include <netdb.h>
 
 #include "list.h"
@@ -79,11 +77,9 @@ List* loadCVS(const char* path){
 bool wild_card_check(char* url, char* name){
     if (name[0] == '*') {
         name++;
-        printf("wildcard %s\n", name);
-        printf("url %s\n", url);
+
         //got rid of the first * char, now see if the domain name contains it
         if (strstr(url, name)) {
-            // printf("%s\n", strstr(name, url));
             return true;
         }
     }
@@ -91,42 +87,146 @@ bool wild_card_check(char* url, char* name){
 }
 
 // check validity of domain name (including Subject Alternative Name extension) and wildcards
-bool domain_name_valid(char* url, char* commonName){
-     //check if domain name is common name
-    if (!strncmp(commonName, url, strlen(url))) {
+bool domain_name_valid(char* url, char* name){
+
+    //check if domain name is common name
+    if (strstr(url, name)) {
         return true;
         //if it is a
-    }else if (wild_card_check(url, commonName)) {
+    }else if (wild_card_check(url, name)) {
         return true;
-    }else{
-        //check Subject Alternative Names
+    }
+    return false;
+}
+
+bool subject_alt_name_check (X509 *cert) {
+    STACK_OF(GENERAL_NAME) * san = (STACK_OF(GENERAL_NAME) *) X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);
+    int num_of_sans;
+    if (san) {
+        num_of_sans = sk_GENERAL_NAME_num(san);
+    } else {
+        num_of_sans = 0;
+        return false;
+    }
+    bool match = false;
+    for (int i=0; i < num_of_sans; i++) {
+
+        GENERAL_NAME *name =  sk_GENERAL_NAME_pop(san);
+        BIO *ext_bio = BIO_new(BIO_s_mem());
+        if (name) {
+            ASN1_STRING_print_ex(ext_bio, name->d.dNSName,ASN1_STRFLGS_SHOW_TYPE);
+
+            BUF_MEM *bptr;
+            BIO_get_mem_ptr(ext_bio, &bptr);
+            BIO_set_close(ext_bio, BIO_NOCLOSE);
+
+            // remove newlines
+            int lastchar = bptr->length;
+            if (lastchar > 1 && (bptr->data[lastchar-1] == '\n' || bptr->data[lastchar-1] == '\r')) {
+                bptr->data[lastchar-1] = (char) 0;
+            }
+            if (lastchar > 0 && (bptr->data[lastchar] == '\n' || bptr->data[lastchar] == '\r')) {
+                bptr->data[lastchar] = (char) 0;
+            }
+            free(bptr);
+        }
+
+        BIO_free(ext_bio);
+
+    }
+    return match;
+}
+
+bool key_usage_check(X509* cert){
+    bool valid = true; //initiate return value
+    bool ext_key_usage_found = false;
+    bool basic_constraint_found = false;
+    STACK_OF(X509_EXTENSION) *exts = cert->cert_info->extensions;
+
+    int num_of_exts;
+    if (exts) {
+        num_of_exts = sk_X509_EXTENSION_num(exts);
+    } else {
+        num_of_exts = 0;
+        return false;
     }
 
+    for (int i=0; i < num_of_exts; i++) {
 
-    return false;
+        X509_EXTENSION *ex = sk_X509_EXTENSION_value(exts, i);
+        ASN1_OBJECT *obj = X509_EXTENSION_get_object(ex);
+
+        BIO *ext_bio = BIO_new(BIO_s_mem());
+        // IFNULL_FAIL(ext_bio, "unable to allocate memory for extension value BIO");
+        if (!X509V3_EXT_print(ext_bio, ex, 0, 0)) {
+            M_ASN1_OCTET_STRING_print(ext_bio, ex->value);
+        }
+
+        BUF_MEM *bptr;
+        BIO_get_mem_ptr(ext_bio, &bptr);
+        BIO_set_close(ext_bio, BIO_NOCLOSE);
+
+        // remove newlines
+        int lastchar = bptr->length;
+        if (lastchar > 1 && (bptr->data[lastchar-1] == '\n' || bptr->data[lastchar-1] == '\r')) {
+            bptr->data[lastchar-1] = (char) 0;
+        }
+        if (lastchar > 0 && (bptr->data[lastchar] == '\n' || bptr->data[lastchar] == '\r')) {
+            bptr->data[lastchar] = (char) 0;
+        }
+
+        BIO_free(ext_bio);
+        unsigned nid = OBJ_obj2nid(obj);
+        char* extname = malloc(MAX_CERT_CHAR);
+        if (nid == NID_undef) {
+            // no lookup found for the provided OID so nid came back as undefined.
+            char ext_name[MAX_CERT_CHAR];
+            OBJ_obj2txt(ext_name, MAX_CERT_CHAR, (const ASN1_OBJECT *) obj, 1);
+            strcpy(extname, ext_name);
+        } else {
+            // the OID translated to a NID which implies that the OID has a known sn/ln
+            const char *c_ext_name = OBJ_nid2ln(nid);
+            strcpy(extname, c_ext_name);
+        }
+        if (strstr(extname, "Basic Constraints")) {
+            if (strstr(bptr->data, "CA:TRUE")) {
+                valid = false;
+                break;
+            }
+            basic_constraint_found = true;
+
+        }
+        if (strstr(extname, "Extended Key Usage"  )) {
+            if (!strstr(bptr->data, "TLS Web Server Authentication")) {
+                valid = false;
+            }
+            ext_key_usage_found = true;
+        }
+        free(extname);
+        free(bptr);
+    }
+    return valid && ext_key_usage_found && basic_constraint_found;
 }
 //check public key size
 bool keysize_check(X509 *cert){
 
-     EVP_PKEY * pubkey;
-     pubkey = X509_get_pubkey (cert);
-     RSA * rsa = EVP_PKEY_get1_RSA(pubkey);
-     //Now rsa contains RSA public key.
-     bool key_valid = false;
-     printf("key size %d\n",RSA_size(rsa));
-
-     if (rsa) {
-         if (RSA_size(rsa)>= MIN_KEY_BYTES) {
+    EVP_PKEY * pubkey;
+    pubkey = X509_get_pubkey (cert);
+    RSA * rsa = EVP_PKEY_get1_RSA(pubkey);
+    //Now rsa contains RSA public key.
+    bool key_valid = false;
+    if (rsa) {
+        if (RSA_size(rsa)>= MIN_KEY_BYTES) {
             key_valid = true;
         }else{
             key_valid = false;
-            return false;
         }
-     }
-     EVP_PKEY_free (pubkey);
-     return key_valid;
+    }
+    EVP_PKEY_free (pubkey);
+    return key_valid;
 
 }
+
 // check if the current time is between before and after date
 bool date_check(const ASN1_TIME *not_before, const ASN1_TIME *not_after){
     // ASN1_TIME current :
@@ -175,7 +275,6 @@ bool cert_check(char* certpath, char* url){
     const ASN1_TIME *not_before = X509_get_notBefore(cert);
     const ASN1_TIME *not_after = X509_get_notAfter(cert);
     bool date_valid = date_check(not_before, not_after);
-    printf("date valid : %d\n", date_valid);
     if (!date_valid) {
         X509_free(cert);
         BIO_free_all(certificate_bio);
@@ -185,66 +284,43 @@ bool cert_check(char* certpath, char* url){
     //domain name validation
     //get subject name
     X509_NAME *cert_name = X509_get_subject_name(cert);
-    // X509_NAME_ENTRY *domain = X509_NAME_get_entry(  cert_name,  0);
     char* commomName = malloc(256 *sizeof(char));
     X509_NAME_get_text_by_NID(cert_name, NID_commonName, commomName, 256);
     bool name_valid = domain_name_valid(url, commomName);
-    printf("subject name exact match? %d\n", name_valid);
 
-    const char * subjectname = X509_NAME_oneline(cert_name, 0, 0);
-    printf("common name:%s\n", subjectname);
-
-    X509_NAME *cert_issuer = X509_get_issuer_name(cert);
-    char issuer_cn[256] = "Issuer CN NOT FOUND";
-    X509_NAME_get_text_by_NID(cert_issuer, NID_commonName, issuer_cn, 256);
-    printf("Issuer CommonName:%s\n", issuer_cn);
+    // if domain name doesnt match common name, check SANs
+    if (!name_valid) {
+        name_valid = subject_alt_name_check(cert);
+    }
+    if (!name_valid) {
+        X509_free(cert);
+        BIO_free_all(certificate_bio);
+        return false;
+    }
 
     //check public key size
     bool key_valid = keysize_check(cert);
     if (!key_valid) {
+        X509_free(cert);
+        BIO_free_all(certificate_bio);
         return false;
     }
 
-    //List of extensions available at
-    //https://www.openssl.org/docs/man1.1.0/crypto/X509_REVOKED_get0_extensions.html
+    //List of extensions
     //Need to check extension exists and is not null
-    X509_CINF *cert_inf = NULL;
-    STACK_OF(X509_EXTENSION) * ext_list;
-
-
-    X509_EXTENSION *ex = X509_get_ext(cert, X509_get_ext_by_NID(cert, NID_subject_key_identifier, -1));
-    ASN1_OBJECT *obj = X509_EXTENSION_get_object(ex);
-    char buff[1024];
-    OBJ_obj2txt(buff, 1024, obj, 0);
-    printf("Extension:%s\n", buff);
-
-    BUF_MEM *bptr = NULL;
-
-    BIO *bio = BIO_new(BIO_s_mem());
-    if (!X509V3_EXT_print(bio, ex, 0, 0)){
-        fprintf(stderr, "Error in reading extensions");
+    if (!key_usage_check(cert)) {
+        X509_free(cert);
+        BIO_free_all(certificate_bio);
+        return false;
     }
-    BIO_flush(bio);
-    BIO_get_mem_ptr(bio, &bptr);
-
-    //bptr->data is not NULL terminated - add null character
-    //error
-    printf("%zu\n", bptr->length);
-    // char *buf = malloc((bptr->length + 2) * sizeof(char));
-    // memcpy(buf, bptr->data, bptr->length);
-    // buf[bptr->length] = '\0';
-
-    //Can print or parse value
-    // printf("always malloc fail %s\n", bptr->data);
-
     //*********************
     // End of Example code
     //*********************
     X509_free(cert);
     BIO_free_all(certificate_bio);
-    BIO_free_all(bio);
 
-    //free(buf);
+
+    //if there is nothing invalid
     return true;
 }
 
@@ -263,14 +339,21 @@ int  main(int argc, char const *argv[]) {
     //check each cert
     Node *node = certs_list->head;
     int i = 0;
+
+    FILE *fp;
+    fp = fopen("output.csv", "w");
+
     while (node) {
         printf("\n\nchecking no.%d\n", i);
         node ->valid = cert_check(node -> name, node -> url);
+        printf("no.%d result : %d\n", i, node ->valid);
+        //write result into csv file
+        fprintf(fp, "%s,%s,%d\n", node -> name, node -> url, node ->valid);
 
         node = node->next;
         i++;
     }
-
+    fclose(fp);
     free_word_list(certs_list);
     exit(0);
 }
