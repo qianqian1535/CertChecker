@@ -7,15 +7,20 @@ CC     = gcc
 CFLAGS = -Wall -lssl -lcrypto
 # exe name and a list of object files that make up the program
 EXE    = certcheck
-OBJ    = certcheck.o
+OBJ    = certcheck.o list.o
 
+# add any new object files here ^
 
+# top (default) target
+all: $(EXE)
 
-$(EXE): $(OBJ) # <-- the target is followed by a list of prerequisites
-	$(CC) $(CFLAGS) -o $(EXE) $(OBJ)
+# how to link executable
+$(EXE): $(OBJ)
+	$(CC) -o $(EXE) $(OBJ) $(CFLAGS)
 
-server.o: certcheck.c certcheck.h
-	$(CC) $(CFLAGS) -c certcheck.c
+certcheck.o: list.h
+list.o: list.h
+
 
 # this can be accessed by specifying this target directly: 'make clean'
 clean:
