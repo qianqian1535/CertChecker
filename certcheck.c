@@ -344,9 +344,7 @@ int  main(int argc, char const *argv[]) {
     fp = fopen("output.csv", "w");
 
     while (node) {
-        printf("\n\nchecking no.%d\n", i);
-        node ->valid = cert_check(node -> name, node -> url);
-        printf("no.%d result : %d\n", i, node ->valid);
+        node ->valid = cert_check(node -> name, node -> url); //check certificate
         //write result into csv file
         fprintf(fp, "%s,%s,%d\n", node -> name, node -> url, node ->valid);
 
