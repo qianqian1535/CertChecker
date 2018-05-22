@@ -16,21 +16,13 @@ Assignment 2
 #include <stdlib.h>
 #include <string.h>
 
-#include <arpa/inet.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/uio.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <netdb.h>
 
 #include "list.h"
 #define MAX_LINE_CHAR 200
 #define MAX_CERT_CHAR 50
-#define PORTNO 3000
 #define MIN_KEY_BYTES 256
 
 /*for handling errors*/
