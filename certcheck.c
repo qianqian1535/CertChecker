@@ -73,33 +73,50 @@ List* loadCVS(const char* path){
     return certs_list;
 }
 
-//check domain name if starts with *
-bool wild_card_check(char* url, char* name){
-    if (name[0] == '*') {
-        name++;
+int strtok_url(char* url){
+    const char dot[2] = ".";
+    int count = 0;
+    char *token;
+    /* get the first token */
+    token = strtok(url, dot);
 
-        //got rid of the first * char, now see if the domain name contains it
-        if (strstr(url, name)) {
-            return true;
+    /* walk through other tokens */
+    while( token != NULL ) {
+        // printf( " %s\n", token );
+        count++;
+        token = strtok(NULL, dot);
+    }
+    return count;
+}
+// check validity of domain name against common name and wildcards
+bool domain_name_valid(char* url, char* name){
+    bool match = true;
+    char* url_tok = malloc((1+ strlen(url))* sizeof(char));
+    strcpy(url_tok, url);
+    char* name_tok = malloc((1+strlen(name))* sizeof(char));
+    strcpy(name_tok, name);
+
+    int url_num = strtok_url(url_tok);
+    int name_num = strtok_url(name_tok);
+    //if the 2 dont have the same number of "."
+    if (url_num != name_num) {
+        match = false;
+    }else{
+        //if it is a wildcard
+        if (name[0] == '*') {
+            name++;
+        }
+        //if they have the same amount of full stops, see if url contains name
+        if (!strstr(url,name)) {
+            match = false;
         }
     }
-    return false;
+    free(url_tok);
+    free(name_tok);
+    return match;
 }
-
-// check validity of domain name (including Subject Alternative Name extension) and wildcards
-bool domain_name_valid(char* url, char* name){
-
-    //check if domain name is common name
-    if (strstr(url, name)) {
-        return true;
-        //if it is a
-    }else if (wild_card_check(url, name)) {
-        return true;
-    }
-    return false;
-}
-
-bool subject_alt_name_check (X509 *cert) {
+//get subject alternative name extension and check if any names match url
+bool subject_alt_name_check (X509 *cert, char* url) {
     STACK_OF(GENERAL_NAME) * san = (STACK_OF(GENERAL_NAME) *) X509_get_ext_d2i(cert, NID_subject_alt_name, NULL, NULL);
     int num_of_sans;
     if (san) {
@@ -127,6 +144,12 @@ bool subject_alt_name_check (X509 *cert) {
             }
             if (lastchar > 0 && (bptr->data[lastchar] == '\n' || bptr->data[lastchar] == '\r')) {
                 bptr->data[lastchar] = (char) 0;
+            }
+            //if there is a match, break loop and return true
+            if (domain_name_valid(url, bptr->data)) {
+                match = true;
+                free(bptr);
+                break;
             }
             free(bptr);
         }
@@ -290,7 +313,7 @@ bool cert_check(char* certpath, char* url){
 
     // if domain name doesnt match common name, check SANs
     if (!name_valid) {
-        name_valid = subject_alt_name_check(cert);
+        name_valid = subject_alt_name_check(cert, url);
     }
     if (!name_valid) {
         X509_free(cert);
@@ -338,8 +361,7 @@ int  main(int argc, char const *argv[]) {
     ERR_load_crypto_strings();
     //check each cert
     Node *node = certs_list->head;
-    int i = 0;
-
+    //write into csv file
     FILE *fp;
     fp = fopen("output.csv", "w");
 
@@ -347,9 +369,7 @@ int  main(int argc, char const *argv[]) {
         node ->valid = cert_check(node -> name, node -> url); //check certificate
         //write result into csv file
         fprintf(fp, "%s,%s,%d\n", node -> name, node -> url, node ->valid);
-
         node = node->next;
-        i++;
     }
     fclose(fp);
     free_word_list(certs_list);
